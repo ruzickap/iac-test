@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "branchPrefix": "renovate/",
+  // https://renovatebot.com/docs/configuration-options/#labels
+  "labels": ["renovate", "renovate/{{replace '.*/' '' depName}}", "renovate/{{updateType}}"],
+  "packageRules": [
+
+    {
+      "description": "Update all 'patch' versions without waiting for tests",
+      "matchUpdateTypes": ["patch"],
+      "automergeType": "branch",
+      "ignoreTests": true,
+      "automerge": true,
+    },
+    {
+      "description": "Ignore frequent renovate updates",
+      "matchPackageNames": ["renovatebot/github-action"],
+      "matchUpdateTypes": ["patch"],
+      "enabled": false
+    },
+    {
+      "description": "Update renovate once per week only if there is a new version",
+      "matchPackageNames": ["renovatebot/github-action"],
+      "matchUpdateTypes": ["major", "minor"],
+      "automergeType": "branch",
+      "automerge": true,
+      "schedule": ["* 0,2,4 1-7 * 0"],
+    },
+    {
+      "description": "Update all github-actions by default",
+      "matchManagers": ["github-actions"],
+      "automergeType": "branch",
+      "automerge": true,
+    },
+    {
+      "matchPaths": ["clusters/**", "flux/**"],
+      "groupName": "k8s apps major and minor dependencies",
+      "groupSlug": "k8s-apps-major-minor-dependencies",
+      "commitBodyTable": true,
+      "separateMajorMinor": false,
+    },
+    {
+      "matchPaths": ["docs/**", "terraform/**"],
+      "groupName": "major and minor dependencies",
+      "groupSlug": "major-minor-dependencies",
+      "commitBodyTable": true,
+      "separateMajorMinor": false,
+    },
+  ],
+  "prBodyTemplate": "{{{table}}}{{{notes}}}{{{changelogs}}}",
+  "rebaseWhen": "behind-base-branch",
+  "regexManagers": [
+    {
+      "fileMatch": [
+        ".*\\.ya?ml$",
+        ".*\\.md$",
+        ".*\\.tfvars$",
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>.+?) depName=(?<depName>.+?)( versioning=(?<versioning>.+?))?( extractVersion=(?<extractVersion>.+?))?( registryUrl=(?<registryUrl>.+?))?\\s.*[=:]\\s*\"?(?<currentValue>.+?)\"?\\s",
+        // Renovate for GH releases like: https://github.com/cert-manager/cert-manager/releases/download/v1.9.0/cert-manager.crds.yaml located in kustomization.yaml
+        "# renovate: datasource=(?<datasource>.+?) depName=(?<depName>.+?)( versioning=(?<versioning>.+?))?( extractVersion=(?<extractVersion>.+?))?\\s.*\\/releases\\/download\\/(?<currentValue>.+?)\\/.*",
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}",
+      "extractVersionTemplate": "{{#if extractVersion}}{{{extractVersion}}}{{else}}^v?(?<version>.+)${{/if}}",
+    },
+  ],
+  "separateMinorPatch": true,
+}
