@@ -1,7 +1,7 @@
 name: tf_run
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       terraform_action:
         description: Terraform action
