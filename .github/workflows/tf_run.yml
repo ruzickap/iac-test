@@ -1,0 +1,110 @@
+name: tf_run
+
+on:
+  workflow_call:
+    inputs:
+      terraform_action:
+        description: Terraform action
+        required: true
+        type: string
+      env-variables:
+        description: Environment variable(s)
+        required: true
+        type: string
+
+env:
+  AWS_DEFAULT_REGION: eu-central-1
+  TERRAFORM_REMOTE_STATE_S3_BUCKET: "ruzickap-iac-test-tfstate"
+  CLOUDFORMATION_STACK_NAME: "ruzickap-iac-test-s3-tfstate"
+  TERRAFORM_CODE_DIR: "terraform"
+  TERRAFORM_BUCKET: "ruzickap-iac-test-tfstate"
+  TERRAFORM_KEY: "terraform-ruzickap-iac-test.tfstate"
+  TERRAFORM_DYNAMODB_TABLE: "ruzickap-iac-test-tfstate"
+
+jobs:
+  tf_run:
+    name: "${{ inputs.terraform_action }}"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    # Cancel job after 100 minutes (just in case)
+    timeout-minutes: 100
+    env:
+      # Terraform variables (https://www.terraform.io/docs/cli/config/environment-variables.html)
+      # renovate: datasource=github-tags depName=hashicorp/terraform
+      TERRAFORM_VERSION: "1.3.9"
+      TF_INPUT: "0"
+      TF_CLI_ARGS_apply: "-auto-approve"
+      TF_CLI_ARGS_destroy: "-auto-approve"
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_github_token: ${{ secrets.CREATE_FLUX_DEPLOY_KEY_GITHUB_TOKEN }}
+    # Allow only one execution of terraform (other executions will wait until first will complete)
+    concurrency:
+      group: tf_run
+    steps:
+      - name: 💡🔪 Check out repository code
+        uses: actions/checkout@v3
+
+      - name: 💡🔪 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE }}
+          role-session-name: GitHubOidcFederatedRole
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: 💡 Create S3 bucket + DynamoDB for Terraform if needed
+        if: ${{ ! startsWith(inputs.terraform_action, 'destroy') }}
+        run: |
+          set -euxo pipefail
+          aws sts get-caller-identity
+          echo -e "\n***💡 Check if S3 bucket exists (may show 404 error - ignore)"
+          if ! aws s3api head-bucket --bucket "${TERRAFORM_REMOTE_STATE_S3_BUCKET}" ; then
+            echo -e "\n***💡 Creating S3 bucket for Terraform using CloudFormation"
+            aws cloudformation deploy \
+              --parameter-overrides "TFStateFileS3BucketName=${TERRAFORM_REMOTE_STATE_S3_BUCKET}" \
+              --stack-name "${CLOUDFORMATION_STACK_NAME}" --template-file "./cloudformation/s3-dynamodb-tfstate.yaml"
+          else
+            echo -e "\n***💡 S3 bucket for Terraform - \"${TERRAFORM_REMOTE_STATE_S3_BUCKET}\" already exists...\n"
+          fi
+
+      - name: 💡🔪 Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      # Terraform needs node command: https://github.com/hashicorp/setup-terraform/issues/84
+      - uses: actions/setup-node@v3
+        with:
+          # renovate: datasource=github-tags depName=nodejs/node versioning=node
+          node-version: 18
+
+      - name: 💡🔪 Terraform init
+        run: |
+          set -euxo pipefail
+          terraform -chdir="${TERRAFORM_CODE_DIR}" init \
+            -backend-config="bucket=${TERRAFORM_BUCKET}" \
+            -backend-config="key=${TERRAFORM_KEY}" \
+            -backend-config="region=${AWS_DEFAULT_REGION}" \
+            -backend-config="dynamodb_table=${TERRAFORM_DYNAMODB_TABLE}"
+
+      - name: 💡🔪 Terraform action
+        run: |
+          set -euxo pipefail
+          terraform -chdir="${TERRAFORM_CODE_DIR}" ${{ inputs.terraform_action }}
+
+      - name: 🔪 Delete S3 bucket + DynamoDB used by Terraform
+        if: ${{ startsWith(inputs.terraform_action, 'destroy') }}
+        run: |
+          set -euxo pipefail
+
+          S3_OBJECTS=$(aws s3api list-object-versions --bucket "${TERRAFORM_BUCKET}" --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}')
+
+          if [[ ! "${S3_OBJECTS}" =~ "\"Objects\": null" ]]; then
+            aws s3api delete-objects --bucket "${TERRAFORM_BUCKET}" \
+              --delete "${S3_OBJECTS}" \
+              --output=json | jq
+          fi
+
+          aws cloudformation delete-stack --stack-name "${CLOUDFORMATION_STACK_NAME}"
+          aws cloudformation wait stack-delete-complete --stack-name "${CLOUDFORMATION_STACK_NAME}"

@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  TFStateFileS3BucketName:
+    Description: Name of the S3 bucket used for TF state file
+    Type: String
+    Default: ruzickap-iac-test-tfstate
+
+Resources:
+  TerraformRemoteStateS3Bucket:
+    # checkov:skip=CKV_AWS_18:Access logging is not needed for S3 bucket used by Terraform
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub "${TFStateFileS3BucketName}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+      Tags:
+        - Key: Name
+          Value: terrraform-remote-state-s3-bucket
+
+  TerraformRemoteStateLockDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${TFStateFileS3BucketName}"
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: alias/aws/dynamodb
+      Tags:
+        - Key: Name
+          Value: terrraform-remote-state-lock-table
+
+Outputs:
+  TerraformRemoteStateS3Bucket:
+    Value: !Ref TerraformRemoteStateS3Bucket
+  TerraformRemoteStateLockDynamoDBTable:
+    Value: !Ref TerraformRemoteStateLockDynamoDBTable
