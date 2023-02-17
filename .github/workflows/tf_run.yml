@@ -4,13 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       terraform_action:
+        type: choice
         description: Terraform action
+        default: plan
         required: true
-        type: string
+        options:
+          - plan
+          - apply
+          - plan -destroy
+          - destroy
+          - destroy -lock=false
       env-variables:
         description: Environment variable(s)
-        required: true
-        type: string
+        # 'TF_CLI_ARGS_destroy=-auto-approve -lock=false'
+        default: "'TF_LOG=ERROR' 'TF_DATA_DIR=.terraform'"
+        required: false
 
 env:
   AWS_DEFAULT_REGION: eu-central-1
